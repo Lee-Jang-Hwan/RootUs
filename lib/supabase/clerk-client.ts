@@ -37,6 +37,10 @@ export function useClerkSupabaseClient() {
     const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!;
     const supabaseKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!;
 
+    if (typeof getToken !== "function") {
+      return createClient(supabaseUrl, supabaseKey);
+    }
+
     return createClient(supabaseUrl, supabaseKey, {
       async accessToken() {
         return (await getToken()) ?? null;
