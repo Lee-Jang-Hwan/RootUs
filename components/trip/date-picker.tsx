@@ -13,6 +13,7 @@ import {
   PopoverContent,
   PopoverTrigger,
 } from "@/components/ui/popover";
+import type { DateRange } from "react-day-picker";
 
 interface DatePickerProps {
   /** 선택된 날짜 */
@@ -117,6 +118,10 @@ interface DateRangePickerProps {
   className?: string;
 }
 
+/**
+ * 여행 기간을 한 번에 선택하는 단일 캘린더.
+ * 캘린더에서 시작일·종료일을 범위로 선택한다.
+ */
 export function DateRangePicker({
   startDate,
   endDate,
@@ -128,68 +133,159 @@ export function DateRangePicker({
   endDateError,
   className,
 }: DateRangePickerProps) {
-  // 종료일 최소/최대 날짜 계산
-  const endDateMin = startDate ? new Date(startDate) : undefined;
-  const endDateMax = startDate
-    ? new Date(startDate.getTime() + (maxDays - 1) * 24 * 60 * 60 * 1000)
-    : undefined;
+  const [open, setOpen] = React.useState(false);
+  const firstClickRef = React.useRef<Date | null>(null);
 
-  // 시작일이 변경되면 종료일 검증
-  const handleStartDateChange = (date: Date | undefined) => {
-    onStartDateChange(date);
+  const selectedRange: DateRange | undefined =
+    startDate != null
+      ? { from: startDate, to: endDate }
+      : undefined;
 
-    // 종료일이 시작일보다 이전이면 초기화
-    if (date && endDate && endDate < date) {
-      onEndDateChange(undefined);
-    }
+  const [tempRange, setTempRange] = React.useState<DateRange | undefined>(
+    selectedRange,
+  );
+  const prevOpenRef = React.useRef(open);
 
-    // 종료일이 최대 기간을 초과하면 초기화
-    if (date && endDate) {
-      const diffDays = Math.ceil(
-        (endDate.getTime() - date.getTime()) / (1000 * 60 * 60 * 24),
-      );
-      if (diffDays >= maxDays) {
-        onEndDateChange(undefined);
+  React.useEffect(() => {
+    const wasOpen = prevOpenRef.current;
+
+    if (open && !wasOpen) {
+      if (startDate && !endDate) {
+        const start = new Date(startDate);
+        start.setHours(0, 0, 0, 0);
+        firstClickRef.current = start;
+        setTempRange(selectedRange);
+      } else {
+        firstClickRef.current = null;
+        setTempRange(startDate && endDate ? undefined : selectedRange);
       }
     }
+
+    if (!open && wasOpen) {
+      firstClickRef.current = null;
+      setTempRange(selectedRange);
+    }
+
+    prevOpenRef.current = open;
+  }, [open, startDate, endDate, selectedRange]);
+
+  const handleSelect = (
+    range: DateRange | undefined,
+    triggerDate?: Date,
+  ) => {
+    if (!triggerDate) {
+      if (range?.from && range.to) {
+        const from = new Date(range.from);
+        const to = new Date(range.to);
+        from.setHours(0, 0, 0, 0);
+        to.setHours(0, 0, 0, 0);
+
+        const normalized =
+          to.getTime() < from.getTime()
+            ? { from: to, to: from }
+            : { from, to };
+
+        setTempRange(normalized);
+        onStartDateChange(normalized.from);
+        onEndDateChange(normalized.to);
+        return;
+      }
+
+      setTempRange(range);
+      onStartDateChange(range?.from);
+      onEndDateChange(range?.to);
+      return;
+    }
+
+    const clickedDay = new Date(triggerDate);
+    clickedDay.setHours(0, 0, 0, 0);
+
+    const hasRange = tempRange?.from && tempRange?.to;
+
+    if (!firstClickRef.current || hasRange) {
+      const nextRange = { from: clickedDay, to: undefined };
+      firstClickRef.current = clickedDay;
+      setTempRange(nextRange);
+      onStartDateChange(nextRange.from);
+      onEndDateChange(undefined);
+      return;
+    }
+
+    const from = firstClickRef.current;
+    const nextRange =
+      clickedDay.getTime() < from.getTime()
+        ? { from: clickedDay, to: from }
+        : { from, to: clickedDay };
+    setTempRange(nextRange);
+    onStartDateChange(nextRange.from);
+    onEndDateChange(nextRange.to);
+    firstClickRef.current = null;
+    setOpen(false);
   };
 
+  const today = React.useMemo(() => {
+    const t = new Date();
+    t.setHours(0, 0, 0, 0);
+    return t;
+  }, []);
+
+  const disabledMatcher = (date: Date) => {
+    const d = new Date(date);
+    d.setHours(0, 0, 0, 0);
+    if (d < today) return true;
+    return false;
+  };
+
+  const buttonLabel =
+    startDate && endDate
+      ? `${format(startDate, "yyyy년 M월 d일", { locale: ko })} ~ ${format(endDate, "M월 d일", { locale: ko })}`
+      : "여행 기간 선택";
+
+  const shouldShowError = !(startDate && !endDate);
+  const hasError = shouldShowError && !!(startDateError || endDateError);
+
+  const startDateLabel = startDate
+    ? format(startDate, "PPP", { locale: ko })
+    : "";
+
+  const displayLabel =
+    startDate && !endDate && startDateLabel ? startDateLabel : buttonLabel;
+
   return (
-    <div className={cn("flex flex-col gap-2 sm:flex-row sm:gap-2", className)}>
-      <div className="flex-1">
-        <label className="text-sm font-medium text-muted-foreground mb-1.5 block">
-          시작일
-        </label>
-        <DatePicker
-          value={startDate}
-          onChange={handleStartDateChange}
-          placeholder="시작일 선택"
-          disabled={disabled}
-        />
-        {startDateError && (
-          <p className="text-sm font-medium text-destructive mt-1">
-            {startDateError}
-          </p>
-        )}
-      </div>
-      <div className="flex-1">
-        <label className="text-sm font-medium text-muted-foreground mb-1.5 block">
-          종료일
-        </label>
-        <DatePicker
-          value={endDate}
-          onChange={onEndDateChange}
-          placeholder="종료일 선택"
-          disabled={disabled || !startDate}
-          minDate={endDateMin}
-          maxDate={endDateMax}
-        />
-        {endDateError && (
-          <p className="text-sm font-medium text-destructive mt-1">
-            {endDateError}
-          </p>
-        )}
-      </div>
+    <div className={cn("space-y-1", className)}>
+      <Popover open={open} onOpenChange={setOpen}>
+        <PopoverTrigger asChild>
+          <Button
+            variant="outline"
+            disabled={disabled}
+            className={cn(
+              "w-full justify-start text-left font-normal touch-target",
+              !selectedRange?.from && "text-muted-foreground",
+              hasError && "border-destructive",
+            )}
+          >
+            <CalendarIcon className="mr-2 h-4 w-4 shrink-0" />
+            <span className="truncate">{displayLabel}</span>
+          </Button>
+        </PopoverTrigger>
+        <PopoverContent className="w-auto p-0" align="start">
+          <Calendar
+            mode="range"
+            selected={tempRange}
+            onSelect={handleSelect}
+            disabled={disabledMatcher}
+            max={maxDays}
+            locale={ko}
+            numberOfMonths={1}
+            initialFocus
+          />
+        </PopoverContent>
+      </Popover>
+      {shouldShowError && (startDateError || endDateError) && (
+        <p className="text-sm font-medium text-destructive">
+          {startDateError ?? endDateError}
+        </p>
+      )}
     </div>
   );
 }
